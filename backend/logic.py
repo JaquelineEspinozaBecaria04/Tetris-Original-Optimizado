@@ -9,7 +9,7 @@ import numpy as np
 import re
 import unicodedata
 import plotly.graph_objects as go
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Dict, Any
 import io
 import base64
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
@@ -22,6 +22,7 @@ RUTA_CATALOGO = os.path.join(BASE_DIR, "data", "CID_Diferencias_catalogo_Vs_Anti
 # ==========================================================
 # SECCIÓN 1: LÓGICA DE LA MACRO (Leer TXT -> Excel)
 # ==========================================================
+# (Esta sección no cambia)
 def importar_txt_a_excel(path_dir, nombre_sitio="default"):
     archivos = []
     for root, dirs, files in os.walk(path_dir):
@@ -107,28 +108,24 @@ def crear_segunda_parte(path_excel):
     df["Azone"] = df["Azone Hostname"].apply(lambda x: x.split(" ")[0] if isinstance(x, str) else "")
     df["Hostname"] = df["Azone Hostname"].apply(lambda x: x.split(" ", 1)[1] if isinstance(x, str) and " " in x else x)
     
-    # --- Función de ayuda para extraer AZ ---
     def format_az_from_azone(x):
         if x in ["internal", "nova"]:
             return x
         az_str = str(x)
         
-        # Intenta encontrar 'az##' (ej. 'ceeaz01' -> 'az01')
         match = re.search(r"(az\d{2})", az_str, re.IGNORECASE)
         if match:
-            return match.group(1).upper() # -> "AZ01"
+            return match.group(1).upper()
         
-        # Si no, intenta encontrar 'cee##' (ej. 'cee01' -> '01')
         match_cee = re.search(r"cee(\d{2})", az_str, re.IGNORECASE)
         if match_cee:
-            return "AZ" + match_cee.group(1) # -> "AZ01"
+            return "AZ" + match_cee.group(1)
         
-        # Fallback si no encuentra patrones conocidos (toma los últimos 2 dígitos y espera que sean el número)
         match_num = re.search(r"(\d{2})$", az_str)
         if match_num:
              return "AZ" + match_num.group(1)
             
-        return "AZ_ND" # Fallback final
+        return "AZ_ND"
 
     df["AZ"] = df["Azone"].apply(format_az_from_azone)
     
@@ -154,15 +151,14 @@ def ejecutar_macro_completa(path_dir):
 # ==========================================================
 # SECCIÓN 2: LÓGICA DE MAPEADO (VNF/VNFC)
 # ==========================================================
+# (Esta sección no cambia)
 def _norm(s: str) -> str:
-    """Utilidad: Normaliza texto (Mayúsculas, sin acentos, sin espacios)."""
     if pd.isna(s): return ""
     s = str(s).strip().upper()
     s = "".join(c for c in unicodedata.normalize("NFKD", s) if not unicodedata.combining(c))
     return " ".join(s.split())
 
 def _best_match(texto: str, candidatos, whole_word: bool = False):
-    """Utilidad: Encuentra la mejor coincidencia de un texto en una lista."""
     textoN = _norm(texto)
     mejor, mejor_len = None, -1
     for cand in candidatos:
@@ -183,12 +179,6 @@ def _best_match(texto: str, candidatos, whole_word: bool = False):
 
 def mapear_vnf_vnfc(df_names: pd.DataFrame, df_dicc: pd.DataFrame,
                     col_name="Name") -> pd.DataFrame:
-    """
-    QUÉ HACE: Lógica principal de mapeo VNF/VNFC.
-    CÓMO FUNCIONA: Usa el diccionario para construir un mapa de
-    "firmas" y "tipos de VM" por VNF, y luego lo aplica a cada
-    fila en el dataframe de datos.
-    """
     dicc = df_dicc.copy()
     necesarios = {"VNF", "VNFC", "VNF2", "VM Type", "Name contiene"}
     if not necesarios <= set(dicc.columns):
@@ -263,10 +253,6 @@ def completar_excepciones(df_names: pd.DataFrame,
                           mapeo: pd.DataFrame,
                           df_exc: pd.DataFrame,
                           col_name="Name") -> pd.DataFrame:
-    """
-    QUÉ HACE: Usa la hoja "Excepciones" del diccionario para
-    rellenar los mapeos que fallaron.
-    """
     out = mapeo.copy()
     if not {"VNF", "TIPO VM"} <= set(df_exc.columns):
         raise ValueError("La hoja 'Excepciones' debe tener columnas: 'VNF' y 'TIPO VM'.")
@@ -293,25 +279,13 @@ def completar_excepciones(df_names: pd.DataFrame,
 # ==========================================================
 # SECCIÓN 3: LÓGICA DE DIBUJADO (Plotly)
 # ==========================================================
+# (Esta sección no cambia)
 def f_tetris_plot(tetris_piezas: pd.DataFrame, tamaño_chip: int, sin_uso: int, site_name: str, cee_tag: str):
-    """
-    QUÉ HACE: Toma un DataFrame de "piezas de tetris" (calculado
-    por build_tetris_for_cee) y lo dibuja con Plotly.
-    CÓMO FUNCIONA:
-    1. Crea una figura de Plotly (go.Figure).
-    2. Itera cada fila del DataFrame y la añade como una barra
-       horizontal (go.Bar) en la figura.
-    3. Configura los ejes, el título y los estilos (hover, etc.).
-    4. NO USA fig.show().
-    DEVUELVE: El objeto 'fig' de Plotly.
-    """
     df = tetris_piezas.copy()
-    # Rellenar valores nulos para evitar errores de concatenación
-    df['AZ'] = df['AZ'].fillna('AZ_ND') # Asegura que AZ nunca sea nulo
+    df['AZ'] = df['AZ'].fillna('AZ_ND')
     df['Host'] = df['Host'].fillna('')
     df['CEE'] = df['CEE'].fillna('') 
     
-    # Cambiado de 'HOST' (que es el número 1,2,3) a 'CEE' (que es "CEE3")
     df['host_chip'] = df['CEE'].astype(str) + ' - ' + df['AZ'] + ' - ' + df['Host'].astype(str)
     
     ordered_hosts = (
@@ -322,17 +296,14 @@ def f_tetris_plot(tetris_piezas: pd.DataFrame, tamaño_chip: int, sin_uso: int, 
     )
     fig = go.Figure()
     
-    # Construir el título dinámico
     title_text = f'TETRIS actual - {site_name} - {cee_tag}'
     
     for _, row in df.iterrows():
-        # 1. Definir el texto de la pieza (solo si es una pieza real)
         if row["VM_Individual_Count"] > 0:
             pieza_str = f'Pieza: {row["VM_Individual_Count"]} de {row["VM_Total_Count"]}'
         else:
             pieza_str = ''
 
-        # 2. Construir el 'hovertemplate'
         hover_template = (
             f'<b>{row["VM"]}</b><br>'
             f'Longitud: {row["Length"]}<br>'
@@ -353,7 +324,7 @@ def f_tetris_plot(tetris_piezas: pd.DataFrame, tamaño_chip: int, sin_uso: int, 
         ))
     fig.update_layout(
         barmode='stack',
-        title=title_text, # Asignar el título dinámico
+        title=title_text,
         xaxis=dict(
             tickmode='linear',
             dtick=1,
@@ -378,30 +349,19 @@ def f_tetris_plot(tetris_piezas: pd.DataFrame, tamaño_chip: int, sin_uso: int, 
     return fig
 
 def build_tetris_for_cee(data, zonas, cee_value, ancho_cee=42):
-    """
-    QUÉ HACE: Filtra el DataFrame 'data' principal para un
-    CEE específico y lo transforma en un formato de "piezas
-    de tetris" listo para ser dibujado.
-    DEVUELVE: Un DataFrame listo para f_tetris_plot.
-    """
     tetris = []
     
-    # Obtiene los datos para el CEE actual
     if cee_value is None:
         data_cee_full = data[data['CEE'].isna()]
     else:
         data_cee_full = data[data['CEE'].astype(str) == str(cee_value)]
 
-    # Obtiene la lista de zonas únicas *dentro de este CEE*
-    # Usa la columna 'OS-EXT-AZ_Formatted' que ya tiene "AZ01", etc.
     zonas_en_cee = sorted(data_cee_full["OS-EXT-AZ_Formatted"].dropna().unique())
 
-    for zona in zonas_en_cee: # Itera sobre las zonas formateadas (ej. 'AZ01')
-        # Filtra el DF del CEE por la zona actual
+    for zona in zonas_en_cee: 
         data_cee = data_cee_full[data_cee_full["OS-EXT-AZ_Formatted"] == zona]
         if data_cee.empty: continue
         
-        # 'zona' ya es el string 'AZ##' formateado
         short_zona = zona 
        
         zona_larga_series = data_cee['OS-EXT-AZ: Availability Zone'].dropna()
@@ -446,11 +406,8 @@ def build_tetris_for_cee(data, zonas, cee_value, ancho_cee=42):
     if tetris_df.empty: return tetris_df
     if 'HOST' not in tetris_df.columns: tetris_df['HOST'] = ' '
     
-   
-    # 1. Ordenar ANTES del cumcount para numeración correcta
     tetris_df = tetris_df.sort_values(by=['AZ', 'HOST', 'Host', 'Chip', 'Start']).reset_index(drop=True)
 
-    # 2. Calcular 'Numero' (X de Y)
     vm_rows = tetris_df['VM'].str.strip().fillna('').ne('') & tetris_df['Length'].gt(0)
     vm_groups = tetris_df[vm_rows].groupby('VM')
     tetris_df.loc[vm_rows, 'VM_Total_Count'] = vm_groups['VM'].transform('count')
@@ -463,7 +420,6 @@ def build_tetris_for_cee(data, zonas, cee_value, ancho_cee=42):
         axis=1
     )
     
-    # 3. CREAR COLUMNA CEE Y RE-NUMERAR HOST (para 'host_chip' y CSV)
     tetris_df['CEE'] = tetris_df['HOST']
     unique_hosts = tetris_df['Host'].unique()
     real_hosts = [h for h in unique_hosts if h.strip() != '']
@@ -471,7 +427,6 @@ def build_tetris_for_cee(data, zonas, cee_value, ancho_cee=42):
     tetris_df['HOST'] = tetris_df['Host'].map(host_map)
     tetris_df['HOST'] = tetris_df['HOST'].astype('object').fillna(' ') 
 
-    # 4. CALCULAR HOST_RELATIVO (para el Excel)
     host_relativos = []
     for zona, grupo in tetris_df.groupby("AZ", sort=False):
         unique_hosts_zona = grupo['Host'].unique()
@@ -482,68 +437,50 @@ def build_tetris_for_cee(data, zonas, cee_value, ancho_cee=42):
     tetris_df['HOST_RELATIVO'] = host_relativos
   
     return tetris_df
+
 # ==========================================================
 # SECCIÓN 4: FUNCIÓN "CEREBRO" PRINCIPAL
 # ==========================================================
-
 def generar_reportes_tetris(temp_dir_path: str, site_name: str) -> List[dict]:
-    """
-    QUÉ HACE: Es la función "cerebro" que orquesta todo.
-    ...
-    11. (NUEVO) Genera un Excel estilizado para cada gráfico.
-    DEVUELVE: Una lista de diccionarios (HTMLs, CSVs y Excels).
-    """
     
-    # 1. Ejecutar macro (sobre los .txt subidos en temp_dir_path)
     ruta_macro = ejecutar_macro_completa(temp_dir_path)
     
-    # 2. Cargar diccionarios (desde rutas fijas)
     print("Cargando diccionarios...")
     df_dicc = pd.read_excel(RUTA_DICC, sheet_name="Diccionario")
     df_exc  = pd.read_excel(RUTA_DICC, sheet_name="Excepciones")
 
-    # 3. Cargar Excel generado y ENRIQUECER datos de AZ faltantes
     print("Cargando datos consolidados...")
     data = pd.read_excel(ruta_macro, sheet_name="Consolidado") 
     
-    # --- Lógica para rellenar AZ faltantes ---
     print("Enriqueciendo datos de AZ...")
     df_2daparte = pd.read_excel(ruta_macro, sheet_name="2daParte")
-    # Crear nombre corto de Host en el DF principal
     data['Host_short'] = data['OS-EXT-SRV-ATTR: Hypervisor Hostname'].astype(str).str.split('.').str[0]
-    # Crear mapa de Host -> AZ desde la 2daParte (ya formateada como 'AZ##')
     df_2daparte_clean = df_2daparte[['Host', 'AZ']].drop_duplicates().dropna(subset=['Host'])
     host_az_map = df_2daparte_clean.set_index('Host')['AZ'].to_dict()
     
-    # Función para aplicar el mapa
     def fill_missing_az(row):
         az = row['OS-EXT-AZ: Availability Zone']
         if pd.isna(az) or str(az).strip() == '':
-            # Si está vacío, buscar en el mapa.
-            return host_az_map.get(row['Host_short'], az) # Devuelve 'AZ##' o 'None'
-        return az # Si no está vacío, devolver el original
+            return host_az_map.get(row['Host_short'], az)
+        return az
 
     data['OS-EXT-AZ: Availability Zone'] = data.apply(fill_missing_az, axis=1)
     
-    # --- Función de formateo de AZ (Corregida BUGS 1 y 3) ---
     def format_az_column(az):
         if pd.isna(az) or str(az).strip() == '':
-            return "AZ_ND" # Zona No Definida
+            return "AZ_ND"
         az_str = str(az)
         if az_str in ["internal", "nova"]:
             return az_str
         
-        # Intenta encontrar 'az##' (ej. 'r3...ceeaz01' -> 'az01')
         match = re.search(r"(az\d{2})", az_str, re.IGNORECASE)
         if match:
-            return match.group(1).upper() # -> "AZ01"
+            return match.group(1).upper()
         
-        # Si no, intenta encontrar 'cee##' (ej. 'r3...cee01' -> '01')
         match_cee = re.search(r"cee(\d{2})", az_str, re.IGNORECASE)
         if match_cee:
-            return "AZ" + match_cee.group(1) # -> "AZ01"
+            return "AZ" + match_cee.group(1)
         
-        # Fallback si no encuentra patrones conocidos (toma los últimos 2 dígitos y espera que sean el número)
         match_num = re.search(r"(\d{2})$", az_str)
         if match_num:
              return "AZ" + match_num.group(1)
@@ -552,10 +489,8 @@ def generar_reportes_tetris(temp_dir_path: str, site_name: str) -> List[dict]:
 
     data["OS-EXT-AZ_Formatted"] = data['OS-EXT-AZ: Availability Zone'].apply(format_az_column)
     
-    # Obtener lista de zonas únicas (ORIGINALES) para pasar a build_tetris
     zonas = sorted(data["OS-EXT-AZ: Availability Zone"].dropna().unique())
 
-    # 4. Mapeo de VNF/VNFC
     print("Mapeando VNF/VNFC...")
     mapeo_inicial = mapear_vnf_vnfc(data, df_dicc, col_name="Name")
     mapeo_final = completar_excepciones(data, mapeo_inicial, df_exc, col_name="Name")
@@ -564,7 +499,6 @@ def generar_reportes_tetris(temp_dir_path: str, site_name: str) -> List[dict]:
     data["Name"] = np.where(~v.isna() & ~c.isna(), v + " " + c,
                         np.where(~v.isna(), v, data["Name"]))
 
-    # 5. Asignar color (desde ruta fija)
     print("Asignando colores...")
     base = pd.read_excel(RUTA_CATALOGO, header=1)
     base["VNF"] = base["VNF"].astype(str)
@@ -575,15 +509,13 @@ def generar_reportes_tetris(temp_dir_path: str, site_name: str) -> List[dict]:
                 return fila["Color"]
         return None
     data["Color"] = data["Name"].apply(obtener_color)
-    data["Color"].fillna("#808080", inplace=True) # Color gris por defecto
+    data["Color"].fillna("#808080", inplace=True) 
 
-    # 6. Extraer CEE
     print("Extrayendo CEEs...")
     data["CEE"] = data["OS-EXT-AZ: Availability Zone"].astype(str).apply(
         lambda x: re.search(r"vapp(\d+)", x).group(1) if re.search(r"vapp(\d+)", x) else None
     )
 
-    # 7. Generar dibujos
     print("Generando gráficos...")
     cee_vals = pd.to_numeric(data["CEE"], errors="coerce")
     unique_cees = sorted([int(x) for x in cee_vals.dropna().unique()])
@@ -603,22 +535,20 @@ def generar_reportes_tetris(temp_dir_path: str, site_name: str) -> List[dict]:
             print(f"No hay piezas para {cee_tag}, se omite.")
             continue
         
-        # Reemplazar ' ' por 'INFRA'
+        # Lógica  de reemplazar ' ' por 'INFRA'
         tetris_cee.loc[tetris_cee["VM"] == " ", "VM"] = "INFRA"
-    
 
-        df = tetris_cee.copy()
-        df['AZ'] = df['AZ'].fillna('AZ_ND')
-        df['Host'] = df['Host'].fillna('')
-        df['CEE'] = df['CEE'].fillna('')
-        df['host_chip'] = df['CEE'].astype(str) + ' - ' + df['AZ'] + ' - ' + df['Host'].astype(str)
-        tetris_cee['host_chip'] = df['host_chip']
-        
-        # Generar nombre de archivo base con el nombre del sitio
+        df_plotly = tetris_cee.copy() # Usar una copia para Plotly
+        df_plotly['AZ'] = df_plotly['AZ'].fillna('AZ_ND')
+        df_plotly['Host'] = df_plotly['Host'].fillna('')
+        df_plotly['CEE'] = df_plotly['CEE'].fillna('')
+        df_plotly['host_chip'] = df_plotly['CEE'].astype(str) + ' - ' + df_plotly['AZ'] + ' - ' + df_plotly['Host'].astype(str)
+        tetris_cee['host_chip'] = df_plotly['host_chip'] # Asegurar que esta columna existe para CSV
+
         base_filename = f"{site_name}_tetris_{cee_tag}"
         
         # --- 1. Generar HTML ---
-        fig = f_tetris_plot(tetris_cee, tamaño_chip, sin_uso, site_name, cee_tag)
+        fig = f_tetris_plot(df_plotly, tamaño_chip, sin_uso, site_name, cee_tag)
         html_content = fig.to_html(full_html=True, include_plotlyjs=True)
         html_outputs.append({
             "filename": f"{base_filename}.html",
@@ -627,31 +557,19 @@ def generar_reportes_tetris(temp_dir_path: str, site_name: str) -> List[dict]:
 
         # --- 2. Generar CSV ---
         print(f"Generando CSV para {cee_tag}...")
-        
         columnas_map = {
-            'AZ': 'AZ',
-            'Host': 'HOST_RELATIVO', # ID relativo de AZ
-            'Chip': 'Chip',
-            'VM': 'VM',
-            'Start': 'Start',
-            'Length': 'Length',
-            'Color': 'Color',
-            'Inst.': 'Inst.',
-            'Anti-Afinidad': 'Anti-Afinidad',
-            'HOST': 'HOST', # ID total del CRV
-            'Numero': 'Numero',
+            'AZ': 'AZ', 'Host': 'HOST_RELATIVO', 'Chip': 'Chip', 'VM': 'VM',
+            'Start': 'Start', 'Length': 'Length', 'Color': 'Color', 'Inst.': 'Inst.',
+            'Anti-Afinidad': 'Anti-Afinidad', 'HOST': 'HOST', 'Numero': 'Numero',
             'host_chip': 'host_chip'
         }
-
         df_csv_final = pd.DataFrame()
         for col_deseada, col_original in columnas_map.items():
             if col_original in tetris_cee.columns:
                 df_csv_final[col_deseada] = tetris_cee[col_original]
             else:
                 df_csv_final[col_deseada] = np.nan 
-
         csv_content = df_csv_final.to_csv(index=False, encoding='utf-8-sig')
-        
         html_outputs.append({
             "filename": f"{base_filename}.csv",
             "content": csv_content
@@ -660,22 +578,20 @@ def generar_reportes_tetris(temp_dir_path: str, site_name: str) -> List[dict]:
         # --- 3. Generar Excel ---
         print(f"Generando Excel para {cee_tag}...")
         try:
-            # 1. Generar diccionario de piezas (para colores y tamaños)
-            diccionario_excel = generar_diccionario(tetris_cee)
-            # 2. Generar matriz de datos ancha
-            matriz_excel = generar_matriz(tetris_cee)
-            # 3. Definir columnas
+            # 1. Crear el diccionario de COLORES 
+            diccionario_colores = generar_diccionario_colores(tetris_cee) 
+            # 2. Crear la MATRIZ, pero almacenando un TUPLE (VM, Length) 
+            matriz_excel = generar_matriz_con_length(tetris_cee)
+            # 3. Definir columnas 
             columnas_excel = definir_columnas(col_info)
-            # 4. Obtener DataFrame final para Excel
+            # 4. Obtener DF final, aplicando el REORDENAMIENTO de columnas
             df_excel_final = obtener_df_final(matriz_excel, columnas_excel)
             
-            # 5. Generar y Estilar el Excel en memoria
-            excel_bytes = generar_excel_bytes(site_name, df_excel_final, diccionario_excel)
-            
-            # 6. Codificar en Base64 para enviarlo por JSON
+            # 5. Generar bytes, adaptado para leer el TUPLE (VM, Length)
+            excel_bytes = generar_excel_bytes(site_name, df_excel_final, diccionario_colores)
+         
             excel_base64 = base64.b64encode(excel_bytes).decode('utf-8')
             
-            # 7. Añadir a los resultados
             html_outputs.append({
                 "filename": f"{base_filename}.xlsx",
                 "content": excel_base64
@@ -684,14 +600,12 @@ def generar_reportes_tetris(temp_dir_path: str, site_name: str) -> List[dict]:
 
         except Exception as e:
             print(f"❌ Error generando Excel para {cee_tag}: {e}")
-            # El proceso continúa aunque falle el Excel
-
 
     print("✅ Proceso completado.")
     return html_outputs
 
 # ==========================================================
-# SECCIÓN 5: LÓGICA DE EXCEL FINAL
+# SECCIÓN 5: LÓGICA DE EXCEL 
 # ==========================================================
 
 # --- Constantes ---
@@ -699,105 +613,102 @@ NUMERO_CHIPS = 2
 NUMERO_CORES = 20
 col_info = ['# S. TOTAL', '# S. ZONA', 'SERVIDOR']
 
-
-def generar_diccionario(df_solucion):
+def generar_diccionario_colores(df_solucion: pd.DataFrame) -> Dict[str, str]:
     """
-    Crea un diccionario de VM -> [Length, Color] a partir
-    del dataframe 'tetris_cee'.
+    Crea un diccionario de VM -> Color.
     """
-    df_diccionario = df_solucion[['VM', 'Length', 'Color']]
+    df_diccionario = df_solucion[['VM', 'Color']]
     df_unique = df_diccionario.drop_duplicates(subset="VM")
-    diccionario = {fila.VM: [fila.Length, fila.Color] for fila in df_unique.itertuples(index=False)}
-
-    diccionario['INFRA'] = [3, '#FBE2D5'] # Color crema/infra 
-    # Remover la entrada ' ' que ya no se usa (si existiera)
-    if ' ' in diccionario:
-        del diccionario[' ']
+    diccionario_colores = {fila.VM: fila.Color for fila in df_unique.itertuples(index=False)}
+    diccionario_colores['INFRA'] = '#FBE2D5' 
     
-    # Manejar VMs sin color (como 'DataMigrationPCRF None')
-    for vm, (length, color) in diccionario.items():
+    # Manejar VMs sin color
+    for vm, color in diccionario_colores.items():
         if pd.isna(color):
-            diccionario[vm] = [length, "#808080"] # Gris por defecto si falta color
+            diccionario_colores[vm] = "#808080" # Gris por defecto
             
-    return diccionario
+    return diccionario_colores
 
-def generar_matriz(df_solucion):
+# --- Genera la matriz con (VM, Length) en las celdas ---
+def generar_matriz_con_length(df_solucion: pd.DataFrame) -> List[List[Any]]:
     """
-    Convierte el dataframe 'tetris_cee' (formato largo) en
-    una matriz (formato ancho) lista para el Excel.
+    Convierte el dataframe 'tetris_cee' en una matriz ancha para Excel.
+    Cada celda que representa una VM ahora contiene un TUPLE
+    (VM_Nombre, Length).
     """
-    # Rellenar NaNs en HOST_RELATIVO para evitar errores
     df_solucion['HOST_RELATIVO'] = df_solucion['HOST_RELATIVO'].fillna(0)
 
     servidores = df_solucion['HOST'].unique()
-    matriz = [[np.nan for _ in range((NUMERO_CORES*NUMERO_CHIPS) + len(col_info) + 1)] for _ in range(len(servidores))]
+    servidores_reales = [h for h in servidores if h != ' ']
+    if not servidores_reales:
+        print("Advertencia: No se encontraron servidores reales para la matriz de Excel.")
+        return []
     
     # Crear un mapa de Host (nombre largo) a su # S. TOTAL (HOST)
     host_to_num = df_solucion.drop_duplicates(subset='Host').set_index('Host')['HOST'].to_dict()
 
+    # Mapeo de HOST (número total) a índice de fila en la matriz (0-based)
+    servidores_reales_sorted = sorted([h for h in host_to_num.values() if h != ' '])
+    host_num_to_matriz_idx = {host_num: i for i, host_num in enumerate(servidores_reales_sorted)}
+    
+    matriz = [[np.nan for _ in range((NUMERO_CORES*NUMERO_CHIPS) + len(col_info) + 1)] for _ in range(len(servidores_reales))]
+
     for fila in df_solucion.itertuples(index=False):
-        # Usar el # S. TOTAL (entero) como índice de fila
         host_num = host_to_num.get(fila.Host)
-        if host_num is None or host_num == ' ': continue # Omitir filas sin host (ej. cabecera AZ)
+        if host_num is None or host_num == ' ': continue 
         
-        idx_fila = int(host_num) - 1 # Convertir a índice 0-based
+        idx_fila = host_num_to_matriz_idx.get(host_num)
+        if idx_fila is None: continue # Host no está en el mapa (ej. cabecera AZ)
         
-        # Asegurarse de que el 'Start' es un número
         try:
             idx_col = int(fila.Start)
         except ValueError:
             continue
-
-        # Escribir la VM ('INFRA' o el nombre)
-        matriz[idx_fila][idx_col] = fila.VM
+        # Almacenar una tupla (Nombre, Longitud)
+        matriz[idx_fila][idx_col] = (fila.VM, fila.Length)
             
-        # --- (MODIFICADO) Asegurarse de que AZ nunca sea NaN en la matriz ---
         matriz[idx_fila][-4] = fila.AZ if pd.notna(fila.AZ) else "AZ_ND"
-        matriz[idx_fila][-3] = fila.HOST # # S. TOTAL
-        matriz[idx_fila][-2] = int(fila.HOST_RELATIVO) # # S. ZONA
-        matriz[idx_fila][-1] = fila.Host # SERVIDOR
+        matriz[idx_fila][-3] = fila.HOST 
+        matriz[idx_fila][-2] = int(fila.HOST_RELATIVO)
+        matriz[idx_fila][-1] = fila.Host 
     
-    # Filtrar filas vacías que pudieron crearse por 'servidores'
     matriz = [fila for fila in matriz if not all(pd.isna(c) for c in fila)]
     return matriz
 
 def definir_columnas(col_info):
-    """Define las columnas para el DataFrame ancho. """
+    """Define las columnas para el DataFrame ancho."""
+    # Define el orden base, la reorganización se hace en obtener_df_final
     return [f'chip_{i}_{j}' for i in range(1, NUMERO_CHIPS + 1) for j in range(1, NUMERO_CORES + 1)] + ['AZ'] + col_info
 
-def obtener_df_final(matriz, columnas):
+def obtener_df_final(matriz: List[List[Any]], columnas: List[str]) -> pd.DataFrame:
     """Crea el DataFrame final y añade las filas de separación por AZ."""
     df = pd.DataFrame(matriz, columns=columnas)
     
     if 'SERVIDOR' in df.columns:
         df['SERVIDOR'] = df['SERVIDOR'].replace(' ', 'INFRA')
 
-    # Insertar filas vacías entre cambios de AZ
     if not df.empty:
-        cambios = df["AZ"] != df["AZ"].shift()
+        # Lógica para insertar separadores
+        df_az_str = df["AZ"].astype(str) # Convertir a string para comparación segura
+        cambios = df_az_str != df_az_str.shift()
         filas_cambio = df.index[cambios].tolist()[1:]
-        for idx in reversed(filas_cambio):  # en reversa
+        for idx in reversed(filas_cambio):
             df = pd.concat([
                 df.iloc[:idx],
                 pd.DataFrame([{}], columns=df.columns), # Fila vacía
                 df.iloc[idx:]
             ], ignore_index=True)
-            
-    # Reordenar columnas 
+    # reordenar columnas
     cols = df.columns
     try:
+        # Orden: [INFO] + [CHIP 1] + [AZ] + [CHIP 2]
         df = df[cols[-len(col_info):].tolist() + cols[:NUMERO_CORES].tolist() + [cols[-(len(col_info)+1)]] + cols[NUMERO_CORES:-(len(col_info)+1)].tolist()]
     except Exception as e:
-        print(f"Error reordenando columnas, cayendo a método simple: {e}")
-        # Fallback a lógica simple
-        cols_info_list = ['AZ'] + col_info
-        cols_chip = [c for c in df.columns if c.startswith("chip_")]
-        df = df[cols_info_list + cols_chip]
-    
+        print(f"Error reordenando columnas (se omite): {e}")
+   
     return df
 
-# --- Función de Estilizado y Guardado  ---
-def generar_excel_bytes(sitio: str, df: pd.DataFrame, diccionario: dict) -> bytes:
+def generar_excel_bytes(sitio: str, df: pd.DataFrame, diccionario_colores: Dict[str, str]) -> bytes:
     """
     Toma el DataFrame final, lo escribe en un Workbook de openpyxl,
     aplica todo el estilo de la Celda 18, y devuelve los bytes
@@ -808,15 +719,25 @@ def generar_excel_bytes(sitio: str, df: pd.DataFrame, diccionario: dict) -> byte
     ws.title = "Tetris"
 
     # 1. Escribir el DataFrame en la hoja
-    for r_idx, row in enumerate(dataframe_to_rows(df, index=False, header=True), 1):
-        for c_idx, value in enumerate(row, 1):
-            ws.cell(row=r_idx, column=c_idx, value=value)
+    # Itera el DF para obtener los valores originales (incluyendo los tuples)
+    # Escribe solo el nombre de la VM en la celda
+    
+    # Escribir cabeceras
+    for c_idx, col_name in enumerate(df.columns.tolist(), 1):
+        ws.cell(row=2, column=c_idx, value=col_name)
 
-    # 2. Insertar fila de título
-    filas_recorridas = 2 # 1 (header) + 1 (excel 1-based)
+    # Escribir datos
+    for r_idx, row_data in enumerate(df.itertuples(index=False), 3): # Empezar en fila 3
+        for c_idx, value in enumerate(row_data, 1):
+            if isinstance(value, tuple) and len(value) == 2:
+                ws.cell(row=r_idx, column=c_idx, value=value[0]) # Escribir solo VM
+            else:
+                ws.cell(row=r_idx, column=c_idx, value=value)
+
+    # 2. Insertar fila de título 
+    filas_recorridas = 3 # 1 (título) + 1 (header) + 1 (excel 1-based)
     columnas_recorridas = 1 # Para el índice de 1 de openpyxl
-    ws.insert_rows(1)
-    filas_recorridas += 1 # Ahora filas_recorridas es 3 
+    
     ws.cell(row=1, column=1, value=f"TETRIS ACTUAL {sitio}")
 
     # 3. Definir estilos
@@ -825,89 +746,104 @@ def generar_excel_bytes(sitio: str, df: pd.DataFrame, diccionario: dict) -> byte
     borde = Side(style="thin", color="000000")
     borde_completo = Border(left=borde, right=borde, top=borde, bottom=borde)
 
-    # 4. Aplicar estilos generales (bordes, fuente, alineación)
-    fila_inicio = 1
-    fila_fin = df.shape[0] + 2 # +1 por header, +1 por título
-    columna_inicio = 1
-    columna_fin = df.shape[1]
+    # 4. Aplicar estilos generales
+    fila_inicio_total = 1
+    fila_fin_total = df.shape[0] + 2 # +2 por título y header
+    columna_inicio_total = 1
+    columna_fin_total = df.shape[1]
 
-    for fila in range(fila_inicio, fila_fin + 1):
-        for col in range(columna_inicio, columna_fin + 1):
+    for fila in range(fila_inicio_total, fila_fin_total + 1):
+        for col in range(columna_inicio_total, columna_fin_total + 1):
             celda = ws.cell(row=fila, column=col)
             celda.font = fuente
             celda.alignment = alineacion
             celda.border = borde_completo
 
     # 5. Combinar celdas y colorear piezas
-    cols = [c for c in df.columns if c.startswith("chip_")] 
-    df_stack = df[cols].stack()
+    cols_chip = [c for c in df.columns if c.startswith("chip_")]
+    
+    # Iterar sobre el DataFrame original (que tiene los tuples)
+    for idx_df, row_data in enumerate(df.itertuples(index=False)):
+        fila_excel = idx_df + filas_recorridas # Mapear al índice 1-based de Excel
 
-    for (idx, col), val in df_stack.items():
-        if pd.isna(val):
-            continue
+        for col_name in cols_chip:
+            if col_name not in df.columns: continue
             
-        col_num = df.columns.get_loc(col)
-        
-        # --- Usar filas_recorridas (3) y columnas_recorridas (1) ---
-        fila_excel = idx + filas_recorridas 
-        col_excel = col_num + columnas_recorridas 
+            col_idx_df = df.columns.get_loc(col_name) # 0-based index en DF
+            col_excel = col_idx_df + columnas_recorridas # 1-based index en Excel
+            
+            value_in_df = row_data[col_idx_df] # Obtener el valor (puede ser tuple)
+            
+            if pd.isna(value_in_df):
+                continue
+            
+            vm_name, length, color = None, 0, None
 
-        try:
-            pieza_info = diccionario.get(val)
-            if pieza_info is None:
-                print(f"Advertencia: VM '{val}' no encontrada en diccionario de colores.")
+            if isinstance(value_in_df, tuple) and len(value_in_df) == 2:
+                vm_name, length = value_in_df
+                color = diccionario_colores.get(vm_name)
+            elif isinstance(value_in_df, str) and value_in_df == "INFRA":
+                vm_name = "INFRA"
+                length = 3 # Longitud fija para INFRA
+                color = diccionario_colores.get("INFRA")
+            else:
+                continue # No es una pieza a pintar
+
+            if length <= 0 or color is None:
                 continue
                 
-            longitud = int(pieza_info[0])
-            color_hex = str(pieza_info[1])[1:] # Quitar '#'
-            
-            if longitud <= 0:
-                continue
+            length = int(length)
+            color_hex = str(color)[1:] # Quitar '#'
 
             fila_inicio_merge = fila_excel
             fila_fin_merge = fila_excel
             col_inicio_merge = col_excel
-            col_fin_merge = col_excel + longitud - 1
-
-            if col_fin_merge > columna_fin:
-                col_fin_merge = columna_fin
+            col_fin_merge = col_excel + length - 1
             
-            ws.merge_cells(start_row=fila_inicio_merge, start_column=col_inicio_merge, end_row=fila_fin_merge, end_column=col_fin_merge)
+            # Asegurarse de no combinar más allá del límite de columnas
+            if col_fin_merge > columna_fin_total:
+                col_fin_merge = columna_fin_total
             
-            relleno = PatternFill(start_color=color_hex, end_color=color_hex, fill_type="solid")
-            ws.cell(row=fila_inicio_merge, column=col_inicio_merge).fill = relleno
+            if col_inicio_merge <= col_fin_merge:
+                try:
+                    ws.merge_cells(start_row=fila_inicio_merge, start_column=col_inicio_merge, end_row=fila_fin_merge, end_column=col_fin_merge)
+                    relleno = PatternFill(start_color=color_hex, end_color=color_hex, fill_type="solid")
+                    ws.cell(row=fila_inicio_merge, column=col_inicio_merge).fill = relleno
+                except Exception as merge_err:
+                    print(f"Error al fusionar celdas para {vm_name} en ({fila_inicio_merge},{col_inicio_merge})-({fila_fin_merge},{col_fin_merge}): {merge_err}")
 
-        except Exception as e:
-            print(f"Error al procesar pieza {val} en fila {idx}: {e}")
-
-    # 6. Colorear Headers (Fila 2)
+    # 6. Colorear Headers (Fila 2) 
     fila_headers = 2
-    color_header = 'FBE2D5' # Crema
+    color_header = 'FBE2D5' 
     relleno_header = PatternFill(start_color=color_header, end_color=color_header, fill_type="solid")
-    
-    for col in range(columna_inicio, columna_fin + 1):
+    for col in range(columna_inicio_total, columna_fin_total + 1):
         celda = ws.cell(row=fila_headers, column=col)
+        celda.fill = relleno_header
+
         texto = celda.value
-        if texto and "chip" in str(texto):
+        if isinstance(texto, str) and "chip_" in texto:
             try:
                 celda.value = int(texto.split("_")[-1])
             except:
                 pass 
-
-    # 7. Colorear columnas de info
-    fila_inicio_datos = 3 # Fila 3 del excel
-    fila_fin_datos = fila_inicio_datos + df.shape[0] -1 # Corrección: df.shape[0] ya incluye separadores
+            
+    # 7. Colorear columnas de info (# S. TOTAL y # S. ZONA)
+    filas_datos_inicio = 3
+    filas_datos_fin = df.shape[0] + 2 
     
-    # Bucle 1: Colorear columnas de info (excepto SERVIDOR)
-    for fila in range(fila_inicio_datos, fila_fin_datos + 1):
-        for col in range(columna_inicio, len(col_info)): # col 1 y 2
+    # Colorear # S. TOTAL y # S. ZONA (Columnas 1 y 2)
+    for fila in range(filas_datos_inicio, filas_datos_fin + 1):
+        for col in range(1, len(col_info)): # Col 1 y 2
             ws.cell(row=fila, column=col).fill = relleno_header
-
-    # Bucle 2: Poner en negrita la columna SERVIDOR
-    fuente_negrita = Font(name="Aptos Narrow", size=11, bold=True)
-    col_servidor_idx = len(col_info) # Columna 3
-    for fila in range(fila_inicio_datos, fila_fin_datos + 1):
-         ws.cell(row=fila, column=col_servidor_idx).font = fuente_negrita
+                
+    # 8. Poner en negrita la columna SERVIDOR 
+    try:
+        col_servidor_idx_excel = df.columns.get_loc('SERVIDOR') + columnas_recorridas
+        fuente_negrita = Font(name="Aptos Narrow", size=11, bold=True)
+        for fila in range(filas_datos_inicio, filas_datos_fin + 1):
+             ws.cell(row=fila, column=col_servidor_idx_excel).font = fuente_negrita
+    except KeyError:
+        print("Advertencia: No se encontró la columna 'SERVIDOR' para negrita.")
 
     # 9. Colorear filas vacías (separadores de AZ)
     indices_nulos = df.index[df.isnull().all(axis=1)].tolist()
@@ -915,61 +851,73 @@ def generar_excel_bytes(sitio: str, df: pd.DataFrame, diccionario: dict) -> byte
     relleno_separador = PatternFill(start_color=color_separador, end_color=color_separador, fill_type="solid")
     
     for idx_nulo in indices_nulos:
-        fila_excel = idx_nulo + filas_recorridas
-        ws.merge_cells(start_row=fila_excel, start_column=columna_inicio, end_row=fila_excel, end_column=columna_fin)
-        celda_merge = ws.cell(row=fila_excel, column=columna_inicio)
+        fila_excel = idx_nulo + filas_recorridas 
+        ws.merge_cells(start_row=fila_excel, start_column=columna_inicio_total, end_row=fila_excel, end_column=columna_fin_total)
+        celda_merge = ws.cell(row=fila_excel, column=columna_inicio_total)
         celda_merge.fill = relleno_separador
-        celda_merge.value = "INFRA"
+        celda_merge.value = "INFRA" 
         
-    # 10. Estilo del Título (Fila 1)
+    # 10. Estilo del Título (Fila 1) 
     fuente_titulo = Font(name="Aptos Narrow", size=16, bold=True, color="FF0000")
     alineacion_titulo = Alignment(horizontal="center", vertical="center")
     color_titulo = "CAEDFB" # Azul claro
     relleno_titulo = PatternFill(start_color=color_titulo, end_color=color_titulo, fill_type="solid")
     
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=columna_fin)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=columna_fin_total)
     celda_titulo = ws.cell(row=1, column=1)
     celda_titulo.font = fuente_titulo
     celda_titulo.alignment = alineacion_titulo
     celda_titulo.fill = relleno_titulo
     
-    # 11.  Estilizar y fusionar columna AZ (vertical)
+    # 11. Estilizar y fusionar columna AZ (vertical)
     try:
-        col_az_idx = df.columns.get_loc('AZ') + 1
+        col_az_idx_excel = df.columns.get_loc('AZ') + columnas_recorridas
         fuente_az = Font(name="Aptos Narrow", size=14, bold=True)
         alineacion_az = Alignment(horizontal="center", vertical="center", textRotation=90)
         color_az = "B5E6A2" # Verde 
         relleno_az = PatternFill(start_color=color_az, end_color=color_az, fill_type="solid")
         
-        fila_inicio_az = 3 # Empezar desde la primera fila de datos (Fila 3 en Excel)
+        fila_inicio_az_merge = 3 # Datos empiezan en fila 3
+        df_az_clean = df.copy()
+        df_az_clean['AZ_str'] = df_az_clean['AZ'].apply(lambda x: str(x) if not pd.isna(x) else 'NAN')
         
-        # Recorrer las filas nulas + la última fila para definir los bloques a fusionar
-        filas_de_corte = indices_nulos + [df.shape[0]] 
-        
-        for idx_corte in filas_de_corte:
-            # +2 porque filas_recorridas es 3, y el índice de df es 0-based
-            fila_fin_az = idx_corte + 2 
+        az_blocks = []
+        current_az = None
+        start_row_block_df = -1
+
+        for idx_df, az_val in enumerate(df_az_clean['AZ_str']):
+            if az_val == 'NAN': 
+                if current_az is not None:
+                    az_blocks.append((current_az, start_row_block_df, idx_df - 1))
+                    current_az = None
+                continue
             
-            if fila_inicio_az > fila_fin_az:
-                continue # Omitir si el bloque está vacío
-                
-            # Aplicar estilo a todas las celdas ANTES de fusionar
-            for fila in range(fila_inicio_az, fila_fin_az + 1):
-                celda = ws.cell(row=fila, column=col_az_idx)
+            if az_val != current_az:
+                if current_az is not None:
+                    az_blocks.append((current_az, start_row_block_df, idx_df - 1))
+                current_az = az_val
+                start_row_block_df = idx_df
+        
+        if current_az is not None:
+            az_blocks.append((current_az, start_row_block_df, len(df_az_clean) - 1))
+
+        for az_val, start_df_idx, end_df_idx in az_blocks:
+            fila_inicio_excel = start_df_idx + filas_recorridas 
+            fila_fin_excel = end_df_idx + filas_recorridas
+            
+            for fila_num in range(fila_inicio_excel, fila_fin_excel + 1):
+                celda = ws.cell(row=fila_num, column=col_az_idx_excel)
                 celda.font = fuente_az
                 celda.alignment = alineacion_az
                 celda.fill = relleno_az
             
-            # Fusionar el bloque
-            if fila_inicio_az != fila_fin_az:
-                ws.merge_cells(start_row=fila_inicio_az, start_column=col_az_idx, end_row=fila_fin_az, end_column=col_az_idx)
-            
-            # Preparar la siguiente fila de inicio (+2 para saltar la fila negra separadora)
-            fila_inicio_az = fila_fin_az + 2 
+            if fila_inicio_excel <= fila_fin_excel:
+                 ws.merge_cells(start_row=fila_inicio_excel, start_column=col_az_idx_excel, 
+                                 end_row=fila_fin_excel, end_column=col_az_idx_excel)
             
     except Exception as e:
         print(f"Error estilizando la columna AZ vertical: {e}")
-   
+
     # 12. Guardar en un stream de bytes en lugar de un archivo
     with io.BytesIO() as bio:
         wb.save(bio)
