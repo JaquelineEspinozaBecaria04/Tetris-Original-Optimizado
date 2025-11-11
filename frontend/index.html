@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generador Tetris</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Outfit:wght@600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <header class="page-header">
+        <div class="brand">
+            <img src="Telcel_logo.png" alt="Logo Izquierdo" class="logo logo-left">
+            <div class="titles">
+                <h1>Telcel Capacity Planning</h1>
+                <p class="subtitle" style="font-size: 1.2rem;" >Generación del Tetris Actual</p>
+            </div>
+            <img src="LogoCID.jpg" alt="Logo Derecho" class="logo logo-right">
+        </div>
+    </header>
+
+    <main class="wrap">
+        
+        <div class="card">
+            <h3 class="section-title">Entrada de Datos</h3>
+            <div class="grid">
+                
+                <div class="grid-item">
+                    <label for="txt-files">Archivo .txt</label>
+                    <input type="file" id="txt-files" name="txt-files" multiple webkitdirectory directory>
+                    <small class="hint">Selecciona la carpeta con los archivos .txt a procesar.</small>
+                </div>
+
+            </div>
+            
+            <div class="row" style="margin-top: 20px;">
+                <button id="process-btn" class="btn primary">Generar Gráficos</button>
+            </div>
+
+            <div id="error-box" class="error" style="display: none; margin-top: 15px;"></div>
+        </div>
+
+        <div class="card">
+            <h3 class="section-title">Resultados</h3>
+            
+            <p id="loading-msg" class="hint" style="display: none;">
+                Procesando, esto puede tardar unos segundos...
+            </p>
+            
+            <div id="results-container">
+                <p class="hint">El gráfico resultante aparecerá aquí.</p>
+            </div>
+        </div>
+
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>
