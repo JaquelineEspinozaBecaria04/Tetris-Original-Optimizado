@@ -11,6 +11,7 @@ import unicodedata
 import plotly.graph_objects as go
 from typing import Optional, Tuple, List, Dict, Any
 import io
+import json
 import base64
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
@@ -544,9 +545,25 @@ def generar_reportes_tetris(temp_dir_path: str, site_name: str) -> List[dict]:
         df_plotly['CEE'] = df_plotly['CEE'].fillna('')
         df_plotly['host_chip'] = df_plotly['CEE'].astype(str) + ' - ' + df_plotly['AZ'] + ' - ' + df_plotly['Host'].astype(str)
         tetris_cee['host_chip'] = df_plotly['host_chip'] # Asegurar que esta columna existe para CSV
-
         base_filename = f"{site_name}_tetris_{cee_tag}"
         
+        # ==================================================
+        # CAMBIO CRÍTICO: CALCULAR Y GUARDAR ESTADÍSTICAS
+        # ==================================================
+        try:
+            stats_cee = calculate_statistics(tetris_cee)
+            stats_json = json.dumps(stats_cee)
+            
+            # Agregamos el JSON a la lista de outputs para que el frontend lo reciba
+            html_outputs.append({
+                "filename": f"{site_name}_tetris_{cee_tag}_stats.json", 
+                "content": stats_json
+            })
+            print(f"📊 Estadísticas generadas para {cee_tag}")
+        except Exception as e:
+            print(f"⚠️ Error calculando estadísticas para {cee_tag}: {e}")
+        # ==================================================
+
         # --- 1. Generar HTML ---
         fig = f_tetris_plot(df_plotly, tamaño_chip, sin_uso, site_name, cee_tag)
         html_content = fig.to_html(full_html=True, include_plotlyjs=True)
@@ -600,6 +617,16 @@ def generar_reportes_tetris(temp_dir_path: str, site_name: str) -> List[dict]:
 
         except Exception as e:
             print(f"❌ Error generando Excel para {cee_tag}: {e}")
+
+        # 4. NUEVO: Agregar Estadísticas al output
+        # Lo pasaremos como un objeto JSON separado o embebido si el front lo soporta.
+        # Dado que app.js agrupa por nombre base, podemos enviar un .json
+
+        stats_json = json.dumps(stats_cee)
+        html_outputs.append({
+            "filename": f"{base_filename}_stats.json", # App.js detectará esto
+            "content": stats_json # Enviar string JSON
+        })
 
     print("✅ Proceso completado.")
     return html_outputs
@@ -922,3 +949,101 @@ def generar_excel_bytes(sitio: str, df: pd.DataFrame, diccionario_colores: Dict[
     with io.BytesIO() as bio:
         wb.save(bio)
         return bio.getvalue()
+    
+# --- AGREGAR ESTA FUNCIÓN AL FINAL O EN UNA SECCIÓN DE UTILIDADES ---
+# --- AGREGAR EN backend/logic.py ---
+
+def calculate_statistics(df: pd.DataFrame) -> Dict:
+    HOST_CAPACITY = 34
+    CHIP_CAPACITY = 17
+    
+    # Filtros básicos: Ignorar INFRA y filas vacías
+    mask_reales = (df['VM'] != 'INFRA') & (df['VM'].str.strip() != '') & (df['Length'] > 0)
+    df_reales = df[mask_reales].copy()
+    
+    # 1. Hosts reales
+    # Convertimos a string para evitar errores si hay mezclas de tipos
+    hosts_unicos = df[df['HOST'].astype(str).str.strip() != '']['HOST'].unique()
+    used_hosts = len(hosts_unicos)
+    
+    # 2. Capacidad y Uso
+    total_capacity = used_hosts * HOST_CAPACITY
+    total_used = int(df_reales['Length'].sum()) if not df_reales.empty else 0
+    
+    # Evitar división por cero
+    util = (total_used / total_capacity) if total_capacity > 0 else 0.0
+    
+    # --- CRÍTICO: n_vms necesario para app.js ---
+    n_vms = len(df_reales)
+
+    # 3. Estadísticas por AZ
+    per_az = {}
+    az_values = [] # Lista para app.js
+    
+    if used_hosts > 0 and 'AZ' in df.columns:
+        for az, df_zona in df.groupby(by='AZ'):
+            if str(az) == 'AZ_ND': continue
+            az_values.append(str(az))
+            
+            # Hosts en esta AZ
+            hosts_en_az = df_zona[df_zona['HOST'].astype(str).str.strip() != '']['HOST'].unique()
+            n_hosts_az = len(hosts_en_az)
+            
+            # Uso en esta AZ
+            mask_az = (df_zona['VM'] != 'INFRA') & (df_zona['VM'].str.strip() != '')
+            used_in_az = int(df_zona.loc[mask_az, 'Length'].sum())
+            
+            cap_az = n_hosts_az * HOST_CAPACITY
+            util_az = (used_in_az / cap_az) if cap_az > 0 else 0.0
+            
+            per_az[str(az)] = {
+                "hosts": int(n_hosts_az),
+                "used": used_in_az,
+                "capacity": int(cap_az),
+                "utilization": util_az
+            }
+    
+    az_values.sort()
+
+    # 4. Chips y Huecos
+    chips_used = 0
+    holes_hist = {}
+    if used_hosts > 0 and not df_reales.empty:
+        # Agrupar por HOST y Chip para unicidad
+        for _, df_chip in df_reales.groupby(by=['HOST', 'Chip']):
+            ch_used = df_chip["Length"].sum()
+            slack = max(0, int(CHIP_CAPACITY - ch_used))
+            holes_hist[str(slack)] = holes_hist.get(str(slack), 0) + 1
+            chips_used += 1
+
+    # 5. Utilización por Host
+    host_utils = []
+    if used_hosts > 0 and not df_reales.empty:
+        for _, df_host in df_reales.groupby(by='HOST'):
+            u = df_host["Length"].sum() / HOST_CAPACITY
+            host_utils.append(u)
+            
+    # Valores seguros para evitar NaN en JSON (que rompe el JS)
+    avg_util = sum(host_utils)/len(host_utils) if host_utils else 0.0
+    max_util = max(host_utils) if host_utils else 0.0
+    min_util = min(host_utils) if host_utils else 0.0
+
+    stats = {
+        "status": "REAL_LOG",
+        "n_vms": n_vms,
+        "az_values": az_values, 
+        "hosts": used_hosts,
+        "total_used": total_used,
+        "total_capacity": total_capacity,
+        "utilization": util,
+        "empty_pct": 1 - util,
+        "chips_used": chips_used,
+        "holes_histogram": holes_hist,
+        "host_utilization": {
+            "avg": avg_util,
+            "max": max_util,
+            "min": min_util,
+        },
+        "per_az": per_az
+    }
+    return stats
