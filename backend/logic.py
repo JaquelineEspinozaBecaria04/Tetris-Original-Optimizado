@@ -953,50 +953,70 @@ def generar_excel_bytes(sitio: str, df: pd.DataFrame, diccionario_colores: Dict[
 # --- AGREGAR ESTA FUNCIÓN AL FINAL O EN UNA SECCIÓN DE UTILIDADES ---
 # --- AGREGAR EN backend/logic.py ---
 
+# REEMPLAZAR LA FUNCIÓN calculate_statistics ACTUAL CON ESTA:
+
 def calculate_statistics(df: pd.DataFrame) -> Dict:
+    """
+    Calcula estadísticas para Tetris Actual.
+    CORRECCIÓN: Filtra la barra gris de encabezado (Host vacío) para no inflar el uso.
+    """
     HOST_CAPACITY = 34
     CHIP_CAPACITY = 17
     
-    # Filtros básicos: Ignorar INFRA y filas vacías
-    mask_reales = (df['VM'] != 'INFRA') & (df['VM'].str.strip() != '') & (df['Length'] > 0)
+    # Aseguramos tipos string para evitar errores
+    df['Host'] = df['Host'].fillna('').astype(str)
+    df['VM'] = df['VM'].fillna('').astype(str)
+    
+    # --- FILTROS DE REALIDAD ---
+    # 1. Excluir INFRA (bloques negros internos)
+    # 2. Excluir VMs vacías
+    # 3. CRÍTICO: Excluir filas donde Host está vacío (esto elimina la BARRA GRIS de encabezado)
+    mask_reales = (
+        (df['VM'] != 'INFRA') & 
+        (df['VM'].str.strip() != '') & 
+        (df['Host'].str.strip() != '') &  # <--- ESTE FILTRO CORRIGE EL >100%
+        (df['Length'] > 0)
+    )
     df_reales = df[mask_reales].copy()
     
-    # 1. Hosts reales
-    # Convertimos a string para evitar errores si hay mezclas de tipos
-    hosts_unicos = df[df['HOST'].astype(str).str.strip() != '']['HOST'].unique()
+    # 1. Hosts Reales (contar nombres únicos no vacíos)
+    hosts_unicos = df[df['Host'].str.strip() != '']['Host'].unique()
     used_hosts = len(hosts_unicos)
     
     # 2. Capacidad y Uso
     total_capacity = used_hosts * HOST_CAPACITY
     total_used = int(df_reales['Length'].sum()) if not df_reales.empty else 0
     
-    # Evitar división por cero
     util = (total_used / total_capacity) if total_capacity > 0 else 0.0
-    
-    # --- CRÍTICO: n_vms necesario para app.js ---
     n_vms = len(df_reales)
 
     # 3. Estadísticas por AZ
     per_az = {}
-    az_values = [] # Lista para app.js
+    az_values = [] 
     
     if used_hosts > 0 and 'AZ' in df.columns:
         for az, df_zona in df.groupby(by='AZ'):
-            if str(az) == 'AZ_ND': continue
-            az_values.append(str(az))
+            az_str = str(az).strip()
+            if az_str in ['AZ_ND', '']: continue
             
-            # Hosts en esta AZ
-            hosts_en_az = df_zona[df_zona['HOST'].astype(str).str.strip() != '']['HOST'].unique()
+            az_values.append(az_str)
+            
+            # Hosts únicos en esta AZ
+            hosts_en_az = df_zona[df_zona['Host'].str.strip() != '']['Host'].unique()
             n_hosts_az = len(hosts_en_az)
             
-            # Uso en esta AZ
-            mask_az = (df_zona['VM'] != 'INFRA') & (df_zona['VM'].str.strip() != '')
+            # Uso en esta AZ (aplicando mismos filtros)
+            mask_az = (
+                (df_zona['VM'] != 'INFRA') & 
+                (df_zona['VM'].str.strip() != '') & 
+                (df_zona['Host'].str.strip() != '') # Filtro crítico
+            )
             used_in_az = int(df_zona.loc[mask_az, 'Length'].sum())
             
             cap_az = n_hosts_az * HOST_CAPACITY
             util_az = (used_in_az / cap_az) if cap_az > 0 else 0.0
             
-            per_az[str(az)] = {
+            per_az[az_str] = {
                 "hosts": int(n_hosts_az),
                 "used": used_in_az,
                 "capacity": int(cap_az),
@@ -1009,8 +1029,7 @@ def calculate_statistics(df: pd.DataFrame) -> Dict:
     chips_used = 0
     holes_hist = {}
     if used_hosts > 0 and not df_reales.empty:
-        # Agrupar por HOST y Chip para unicidad
-        for _, df_chip in df_reales.groupby(by=['HOST', 'Chip']):
+        for _, df_chip in df_reales.groupby(by=['HOST', 'Chip']): # Agrupar por identificador único
             ch_used = df_chip["Length"].sum()
             slack = max(0, int(CHIP_CAPACITY - ch_used))
             holes_hist[str(slack)] = holes_hist.get(str(slack), 0) + 1
@@ -1023,7 +1042,6 @@ def calculate_statistics(df: pd.DataFrame) -> Dict:
             u = df_host["Length"].sum() / HOST_CAPACITY
             host_utils.append(u)
             
-    # Valores seguros para evitar NaN en JSON (que rompe el JS)
     avg_util = sum(host_utils)/len(host_utils) if host_utils else 0.0
     max_util = max(host_utils) if host_utils else 0.0
     min_util = min(host_utils) if host_utils else 0.0

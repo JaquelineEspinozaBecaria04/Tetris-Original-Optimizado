@@ -106,71 +106,55 @@ document.addEventListener('DOMContentLoaded', () => {
                 try {
                     const s = JSON.parse(group.stats.content);
                     
-                    // Contenedor principal de estadísticas con estilo flex
+                    // Usamos la clase 'stats' que ya tiene el estilo grid/flex oscuro en tu CSS
                     const statsContainer = document.createElement('div');
-                    statsContainer.className = 'stats-panel'; // Clase para CSS
-                    // Estilos en línea para asegurar que funcione sin CSS externo
-                    statsContainer.style.display = 'flex';
-                    statsContainer.style.flexWrap = 'wrap';
-                    statsContainer.style.gap = '10px';
-                    statsContainer.style.padding = '10px';
-                    statsContainer.style.border = '1px solid #ddd';
-                    statsContainer.style.borderRadius = '8px';
-                    statsContainer.style.backgroundColor = '#f9f9f9';
-                    statsContainer.style.fontFamily = 'Arial, sans-serif'; // Fuente legible
+                    statsContainer.className = 'stats'; 
                     
-                    // Título del panel de estadísticas
-                    const title = document.createElement('h3');
-                    title.textContent = `Estadísticas - ${baseName}`;
-                    title.style.width = '100%';
-                    title.style.margin = '0 0 10px 0';
-                    title.style.fontSize = '1.1em';
-                    statsContainer.appendChild(title);
-
-                    // Función interna para crear cada tarjeta (limpia el código)
+                    // Función interna para crear cada tarjeta usando la clase 'stat'
                     const createStatCard = (label, value) => {
                         const card = document.createElement('div');
-                        card.className = 'stat-card'; // Clase para CSS
-                        card.style.flex = '1 1 150px'; // Crece y se achica, base de 150px
-                        card.style.padding = '8px';
-                        card.style.border = '1px solid #eee';
-                        card.style.borderRadius = '4px';
-                        card.style.backgroundColor = '#fff';
-                        card.style.boxSizing = 'border-box'; // Para padding correcto
-                        card.innerHTML = `<b style="display: block; font-size: 0.9em; color: #555;">${label}</b><div style="font-size: 1.2em; font-weight: 600; color: #111;">${value}</div>`;
+                        card.className = 'stat'; 
+                        // Eliminamos los estilos inline de background y color para que tome el CSS oscuro
+                        card.innerHTML = `<b>${label}</b><div>${value}</div>`;
                         return card;
                     };
 
-                    // Añadir tarjetas de estadísticas
+                    // Añadir tarjetas
                     statsContainer.appendChild(createStatCard('Estado', safe(s.status)));
                     statsContainer.appendChild(createStatCard('VMs', safe(s.n_vms)));
                     statsContainer.appendChild(createStatCard('Hosts', safe(s.hosts)));
                     statsContainer.appendChild(createStatCard('Capacidad', safe(s.total_capacity)));
                     statsContainer.appendChild(createStatCard('Usado', safe(s.total_used)));
                     statsContainer.appendChild(createStatCard('Utilización', fmtPct(s.utilization)));
+                    statsContainer.appendChild(createStatCard('Sin Uso', fmtPct(s.empty_pct)));
                     
                     if (s.chips_used !== undefined) {
                         statsContainer.appendChild(createStatCard('Chips usados', safe(s.chips_used)));
                     }
+                    
                     if (s.host_utilization) {
+                        // Formato compacto para la tarjeta de utilización
                         const hostUtilHTML = `Prom: ${fmtPct(s.host_utilization.avg)}<br>Max: ${fmtPct(s.host_utilization.max)}<br>Min: ${fmtPct(s.host_utilization.min)}`;
                         statsContainer.appendChild(createStatCard('Utilización/host', hostUtilHTML));
                     }
+                    
+                    // AZ Detectadas (Si son muchas, el CSS debe manejar el wrap)
                     if (s.az_values && s.az_values.length) {
                         statsContainer.appendChild(createStatCard('AZ detectadas', s.az_values.join(", ")));
                     }
+                    
+                    // Detalles por AZ
                     if (s.per_az) {
                         for (const [az, v] of Object.entries(s.per_az)) {
-                            const azHTML = `Hosts: ${safe(v.hosts)}<br>Util: ${fmtPct(v.utilization)}`;
+                            const azHTML = `hosts: ${safe(v.hosts)}<br>utilidad: ${fmtPct(v.utilization)}`;
                             statsContainer.appendChild(createStatCard(az, azHTML));
                         }
                     }
                     
-                    // Añadir el panel de stats ANTES de los botones
                     groupContainer.appendChild(statsContainer);
 
                 } catch (e) {
-                    console.error("Error al renderizar estadísticas:", e, group.stats.content);
+                    console.error("Error al renderizar estadísticas:", e);
                 }
             }
             
