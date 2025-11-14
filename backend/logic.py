@@ -735,7 +735,7 @@ def obtener_df_final(matriz: List[List[Any]], columnas: List[str]) -> pd.DataFra
    
     return df
 
-def generar_excel_bytes(sitio: str, df: pd.DataFrame, diccionario_colores: Dict[str, str]) -> bytes:
+def generar_excel_bytes(sitio: str, cee_tag: str, df: pd.DataFrame, diccionario_colores: Dict[str, str]) -> bytes:
     """
     Toma el DataFrame final, lo escribe en un Workbook de openpyxl,
     aplica todo el estilo de la Celda 18, y devuelve los bytes
@@ -765,7 +765,7 @@ def generar_excel_bytes(sitio: str, df: pd.DataFrame, diccionario_colores: Dict[
     filas_recorridas = 3 # 1 (título) + 1 (header) + 1 (excel 1-based)
     columnas_recorridas = 1 # Para el índice de 1 de openpyxl
     
-    ws.cell(row=1, column=1, value=f"TETRIS ACTUAL {sitio}")
+    ws.cell(row=1, column=1, value=f"TETRIS ACTUAL {sitio} - {cee_tag}")
 
     # 3. Definir estilos
     fuente = Font(name="Aptos Narrow", size=11)
@@ -1047,7 +1047,7 @@ def calculate_statistics(df: pd.DataFrame) -> Dict:
     min_util = min(host_utils) if host_utils else 0.0
 
     stats = {
-        "status": "REAL_LOG",
+        "status": "ACTUAL",
         "n_vms": n_vms,
         "az_values": az_values, 
         "hosts": used_hosts,
